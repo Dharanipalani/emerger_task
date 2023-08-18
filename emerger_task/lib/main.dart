@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:emerger_task/data/database.dart';
 import 'package:emerger_task/environement/environment.dart';
@@ -7,6 +8,7 @@ import 'package:emerger_task/widgets/generic_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:http/http.dart' as http;
+import 'package:sqflite/sqflite.dart';
 
 import 'logic/bloc/network_bloc.dart';
 import 'logic/bloc/network_event.dart';
@@ -28,15 +30,15 @@ class MyApp extends StatelessWidget {
       ),
       home: BlocProvider(
         create: (context) => NetworkBloc()..add(NetworkObserve()),
-        child: const MyHomePage(),
+        child: MyHomePage(),
       ),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({Key? key}) : super(key: key);
-
+  MyHomePage({Key? key}) : super(key: key);
+  bool? isConnected;
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
@@ -48,7 +50,6 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    photoModel = _fetchAndSavedataInLocal();
   }
 
   @override
@@ -58,27 +59,50 @@ class _MyHomePageState extends State<MyHomePage> {
         title: const Text('Emergere Tech Task'),
       ),
       body: Center(
-        child: BlocBuilder<NetworkBloc, NetworkState>(
-          builder: (context, state) {
-            if (state is NetworkSuccess) {
-              print('Fetching from internet!!');
-              return GenericWidget(
-                key: const ObjectKey('online_mode'),
-                databaseManager: databaseManager,
-                futurePhotoModel: photoModel,
-              );
-            } else if (state is NetworkFailure) {
-              print('Fetching from local!!');
-              return GenericWidget(
-                key: const ObjectKey('Offline_mode'),
-                databaseManager: databaseManager,
-                futurePhotoModel: databaseManager.getDataList(),
-              );
-            }
-
-            return const CircularProgressIndicator();
-          },
-        ),
+        child: FutureBuilder(
+            future: isInternetConnectedorNot(),
+            builder: (context, snapshot) {
+              if (snapshot.hasData) {
+                return BlocBuilder<NetworkBloc, NetworkState>(
+                  builder: (context, state) {
+                    if (state is NetworkSuccess || (snapshot.data == true)) {
+                      print('Fetching from internet!!');
+                      return GenericWidget(
+                        key: const ObjectKey('online_mode'),
+                        databaseManager: databaseManager,
+                        futurePhotoModel: _fetchAndSavedataInLocal(),
+                      );
+                    } else if (state is NetworkFailure ||
+                        (snapshot.data == false)) {
+                      return FutureBuilder(
+                          future: tableIsEmpty(),
+                          builder: (context, tableEmptySnapshot) {
+                            if (tableEmptySnapshot.connectionState ==
+                                    ConnectionState.done &&
+                                tableEmptySnapshot.data == false) {
+                              print('Fetching from local!!');
+                              return GenericWidget(
+                                key: const ObjectKey('Offline_mode'),
+                                databaseManager: databaseManager,
+                                futurePhotoModel: databaseManager.getDataList(),
+                              );
+                            } else if (tableEmptySnapshot.connectionState ==
+                                    ConnectionState.done &&
+                                tableEmptySnapshot.data == true) {
+                              return const Text(
+                                  'Switch on the internet for first time');
+                            } else {
+                              return const CircularProgressIndicator();
+                            }
+                          });
+                    }
+                    return const CircularProgressIndicator();
+                  },
+                );
+              } else {
+                return const CircularProgressIndicator();
+              }
+            }),
       ),
     );
   }
@@ -103,5 +127,30 @@ class _MyHomePageState extends State<MyHomePage> {
     } else {
       throw Exception('Failed to load');
     }
+  }
+
+  Future<bool?> isInternetConnectedorNot() async {
+    try {
+      final result = await InternetAddress.lookup('example.com');
+      if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
+        print('connected');
+        widget.isConnected = true;
+        return widget.isConnected;
+      }
+    } on SocketException catch (_) {
+      widget.isConnected = false;
+      print('not connected');
+      return widget.isConnected;
+    }
+  }
+
+  Future<bool?> tableIsEmpty() async {
+    var db = await databaseManager.openDb();
+
+    int? count =
+        Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM photo'));
+
+    print(count);
+    return count != null && count > 0 ? false : true;
   }
 }

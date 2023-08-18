@@ -33,7 +33,6 @@ class DatabaseManager {
         await _database!.rawQuery('SELECT * FROM photo');
 
     return List.generate(maps.length, (i) {
-      print(i);
       return PhotoModel(
           id: maps[i]['id'],
           albumId: maps[i]['albumId'],
